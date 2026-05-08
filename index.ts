@@ -6,7 +6,7 @@ const slackAdapter = createSlackAdapter();
 
 async function* streamCodex(prompt: string): AsyncIterable<string> {
   const proc = Bun.spawn(
-    ["codex", "exec", "--ephemeral", "--ignore-user-config", "-m", "gpt-5.4", "-s", "read-only", "--json", "-"],
+    ["codex", "exec", "--ephemeral", "-m", "gpt-5.4", "-s", "read-only", "--json", "-"],
     { stdin: "pipe", stdout: "pipe", stderr: "ignore" },
   );
   proc.stdin.write(prompt);
