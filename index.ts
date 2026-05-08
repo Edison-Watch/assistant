@@ -37,6 +37,20 @@ async function* streamCodex(prompt: string): AsyncIterable<string> {
       } catch {}
     }
   }
+
+  if (buffer.trim()) {
+    try {
+      const event = JSON.parse(buffer);
+      if (
+        event.type === "item.completed" &&
+        event.item?.type === "agent_message" &&
+        event.item.text
+      ) {
+        if (messageCount > 0) yield "\n\n---\n\n";
+        yield event.item.text;
+      }
+    } catch {}
+  }
 }
 
 const bot = new Chat({
