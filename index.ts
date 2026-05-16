@@ -1,57 +1,11 @@
 import { Chat, toAiMessages } from "chat";
 import { createSlackAdapter } from "@chat-adapter/slack";
 import { createRedisState } from "@chat-adapter/state-redis";
+import { streamCodex } from "./lib/codex";
+import { granolaWebhook } from "./webhooks/granola";
+import type { WebhookRoute } from "./webhooks/types";
 
 const slackAdapter = createSlackAdapter();
-
-async function* streamCodex(prompt: string): AsyncIterable<string> {
-  const proc = Bun.spawn(
-    ["codex", "exec", "--ephemeral", "-s", "read-only", "--json", "-"],
-    { stdin: "pipe", stdout: "pipe", stderr: "ignore" },
-  );
-  proc.stdin.write(prompt);
-  proc.stdin.end();
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let messageCount = 0;
-
-  for await (const chunk of proc.stdout) {
-    buffer += decoder.decode(chunk, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const event = JSON.parse(line);
-        if (
-          event.type === "item.completed" &&
-          event.item?.type === "agent_message" &&
-          event.item.text
-        ) {
-          if (messageCount > 0) yield "\n\n---\n\n";
-          yield event.item.text;
-          messageCount++;
-        }
-      } catch {}
-    }
-  }
-
-  if (buffer.trim()) {
-    try {
-      const event = JSON.parse(buffer);
-      if (
-        event.type === "item.completed" &&
-        event.item?.type === "agent_message" &&
-        event.item.text
-      ) {
-        if (messageCount > 0) yield "\n\n---\n\n";
-        yield event.item.text;
-      }
-    } catch {}
-  }
-}
 
 const bot = new Chat({
   userName: "edison-bot",
@@ -76,6 +30,8 @@ bot.onNewMention(async (thread, message) => {
 
 await bot.initialize();
 
+const webhooks: WebhookRoute[] = [granolaWebhook({ bot })];
+
 const port = 3123;
 
 Bun.serve({
@@ -86,10 +42,13 @@ Bun.serve({
         return slackAdapter.handleWebhook(req);
       },
     },
+    ...Object.fromEntries(webhooks.map((w) => [w.path, { POST: w.handler }])),
   },
   fetch(req) {
     return new Response("Not found", { status: 404 });
   },
 });
 
-console.log("Bot is running! Webhook listening on http://localhost:3123/api/webhooks/slack");
+console.log(`Bot is running on http://localhost:${port}`);
+console.log(`  POST /api/webhooks/slack`);
+for (const w of webhooks) console.log(`  POST ${w.path}`);
