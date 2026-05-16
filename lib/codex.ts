@@ -45,4 +45,9 @@ export async function* streamCodex(prompt: string): AsyncIterable<string> {
       }
     } catch {}
   }
+
+  const exitCode = await proc.exited;
+  if (exitCode !== 0) {
+    throw new Error(`codex exited with code ${exitCode}`);
+  }
 }

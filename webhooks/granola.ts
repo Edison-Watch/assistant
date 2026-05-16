@@ -33,13 +33,24 @@ export function granolaWebhook(ctx: WebhookContext): WebhookRoute {
         return new Response("GRANOLA_SLACK_CHANNEL_ID not configured", { status: 500 });
       }
 
-      let payload: GranolaPayload;
+      let raw: unknown;
       try {
-        payload = (await req.json()) as GranolaPayload;
+        raw = await req.json();
       } catch {
         return new Response("Invalid JSON", { status: 400 });
       }
-      if (!payload.meeting_id || !payload.title || !payload.transcript) {
+      if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+        return new Response("Invalid payload: expected a JSON object", { status: 400 });
+      }
+      const payload = raw as Partial<GranolaPayload>;
+      if (
+        typeof payload.meeting_id !== "string" ||
+        typeof payload.title !== "string" ||
+        typeof payload.transcript !== "string" ||
+        !payload.meeting_id ||
+        !payload.title ||
+        !payload.transcript
+      ) {
         return new Response("Missing required fields: meeting_id, title, transcript", { status: 400 });
       }
 
@@ -49,7 +60,7 @@ export function granolaWebhook(ctx: WebhookContext): WebhookRoute {
         return new Response("Duplicate (already processed)", { status: 200 });
       }
 
-      void processGranolaMeeting(ctx, channelId, payload);
+      void processGranolaMeeting(ctx, channelId, payload as GranolaPayload);
 
       return new Response("OK", { status: 200 });
     },
@@ -62,8 +73,9 @@ async function processGranolaMeeting(
   payload: GranolaPayload,
 ) {
   const channel = ctx.bot.channel(`slack:${channelId}`);
-  const attendeesLine = payload.attendees?.length
-    ? `\nAttendees: ${payload.attendees.join(", ")}`
+  const attendees = Array.isArray(payload.attendees) ? payload.attendees : [];
+  const attendeesLine = attendees.length
+    ? `\nAttendees: ${attendees.join(", ")}`
     : "";
 
   const prompt = `Write a Slack message summarizing the following meeting.
