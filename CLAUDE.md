@@ -6,6 +6,7 @@ Slack bot using [chat-sdk](https://chat-sdk.dev) with `@chat-adapter/slack` (web
 - HTTP server: `Bun.serve()` on port 3123
 - State: local Redis on `localhost:6379` (also used for inbound-webhook dedup via `Bun.redis`)
 - Slack setup and known issues: `docs/SLACK_INTEGRATION.md`
+- Deployment (launchd LaunchAgent, external-volume Full Disk Access, codex cert gotcha): `docs/DEPLOY.md`
 
 ## Inbound webhooks (custom, non-Slack)
 
