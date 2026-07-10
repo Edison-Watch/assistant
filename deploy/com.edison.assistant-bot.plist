@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  launchd LaunchAgent for the Slack bot. See docs/DEPLOY.md.
-  Install to ~/Library/LaunchAgents/com.edison.assistant-bot.plist and edit
-  WorkingDirectory to your local checkout. Env (SLACK_*, REDIS_URL, WEBHOOK_SECRET,
-  GRANOLA_SLACK_CHANNEL_ID) is auto-loaded by Bun from .env in WorkingDirectory —
-  do NOT put secrets in this file.
+  launchd LaunchAgent template for the Slack bot. See docs/DEPLOY.md.
+
+  This is a TEMPLATE: __USER__ and __WORKDIR__ are placeholders that must be
+  substituted before installing to ~/Library/LaunchAgents/. The install command
+  in docs/DEPLOY.md renders it with sed. Do NOT add secrets — env comes from
+  .env in WorkingDirectory (auto-loaded by Bun).
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -18,23 +19,23 @@
         <string>index.ts</string>
     </array>
 
-    <!-- Machine-specific: absolute path to your checkout (real path, not a symlink). -->
+    <!-- Absolute path to your checkout (real path, not a symlink). -->
     <key>WorkingDirectory</key>
-    <string>/Volumes/Data/edison_workdir/Github/assistant</string>
+    <string>__WORKDIR__</string>
 
     <key>RunAtLoad</key><true/>
     <key>KeepAlive</key><true/>
     <key>ThrottleInterval</key><integer>10</integer>
 
-    <key>StandardOutPath</key><string>/Users/edison/Library/Logs/assistant-bot.log</string>
-    <key>StandardErrorPath</key><string>/Users/edison/Library/Logs/assistant-bot.log</string>
+    <key>StandardOutPath</key><string>/Users/__USER__/Library/Logs/assistant-bot.log</string>
+    <key>StandardErrorPath</key><string>/Users/__USER__/Library/Logs/assistant-bot.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/edison/.bun/bin</string>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/__USER__/.bun/bin</string>
         <key>HOME</key>
-        <string>/Users/edison</string>
+        <string>/Users/__USER__</string>
     </dict>
 </dict>
 </plist>

@@ -5,9 +5,15 @@ auto-restarts on crash. Template: [`deploy/com.edison.assistant-bot.plist`](../d
 
 ## Install
 
+The template contains two placeholders — `__USER__` and `__WORKDIR__` — that must
+be substituted before installing. `sed` handles both:
+
 ```sh
-# 1. Copy the template into place and edit WorkingDirectory to your checkout.
-cp deploy/com.edison.assistant-bot.plist ~/Library/LaunchAgents/
+# 1. Render the template into ~/Library/LaunchAgents/, substituting the current
+#    user and the absolute path to this checkout.
+sed -e "s|__USER__|$USER|g" -e "s|__WORKDIR__|$(pwd -P)|g" \
+    deploy/com.edison.assistant-bot.plist \
+    > ~/Library/LaunchAgents/com.edison.assistant-bot.plist
 
 # 2. Make sure Redis is running (used for chat state + inbound-webhook dedup).
 brew services start redis
@@ -20,6 +26,13 @@ tail -n 20 ~/Library/Logs/assistant-bot.log   # expect "Bot is running on http:/
 lsof -i :3123                                  # expect a bun process LISTEN
 curl -i -X POST http://localhost:3123/api/webhooks/slack -d '{}'   # expect 401 (adapter reachable)
 ```
+
+Run step 1 from the repo root so `pwd -P` resolves to the real checkout path
+(without symlinks — important because a symlinked `WorkingDirectory` may hit the
+external-volume TCC gotcha below). If you're deploying for a different Unix user
+than the one you're running the shell as, replace `$USER` with the target
+username. `Label` intentionally stays `com.edison.assistant-bot` (the reverse-DNS
+prefix refers to the org, not the local user).
 
 Env vars (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `REDIS_URL`, `WEBHOOK_SECRET`,
 `GRANOLA_SLACK_CHANNEL_ID`) are auto-loaded by Bun from `.env` in `WorkingDirectory`.
@@ -65,8 +78,15 @@ The Granola webhook shells out to the `codex` CLI (`lib/codex.ts`). If codex han
 its signing certificate has likely been **revoked**. Check:
 
 ```sh
-spctl --assess -vvv --type execute \
-  "$(dirname "$(readlink -f "$(command -v codex)")")"/../lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex
+# Locate the arch-specific codex binary under npm's global root without resolving
+# symlinks (works for both `arm64` and `x86_64`, and with either flat or nested
+# npm layouts). BSD-safe; no `readlink -f` needed.
+CODEX_BIN="$(find "$(npm root -g)" -type f -name codex -path '*/vendor/*/bin/codex' 2>/dev/null | head -n 1)"
+if [ -z "$CODEX_BIN" ]; then
+  echo "codex arch binary not found under $(npm root -g)"
+else
+  spctl --assess -vvv --type execute "$CODEX_BIN"
+fi
 # CSSMERR_TP_CERT_REVOKED  => revoked
 ```
 
