@@ -27,11 +27,11 @@ lsof -i :3123                                  # expect a bun process LISTEN
 curl -i -X POST http://localhost:3123/api/webhooks/slack -d '{}'   # expect 401 (adapter reachable)
 ```
 
-Run step 1 from the repo root so `pwd -P` resolves to the real checkout path
-(without symlinks — important because a symlinked `WorkingDirectory` may hit the
-external-volume TCC gotcha below). If you're deploying for a different Unix user
-than the one you're running the shell as, replace `$USER` with the target
-username. `Label` intentionally stays `com.edison.assistant-bot` (the reverse-DNS
+Run the install as the Unix user the bot should run under, from the repo root:
+`$USER`, `$(id -u)`, and `~/Library/…` in the block above all resolve against that
+same user. `pwd -P` gives the real checkout path without symlinks — important
+because a symlinked `WorkingDirectory` may hit the external-volume TCC gotcha
+below. `Label` intentionally stays `com.edison.assistant-bot` (the reverse-DNS
 prefix refers to the org, not the local user).
 
 Env vars (`SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `REDIS_URL`, `WEBHOOK_SECRET`,
@@ -78,12 +78,18 @@ The Granola webhook shells out to the `codex` CLI (`lib/codex.ts`). If codex han
 its signing certificate has likely been **revoked**. Check:
 
 ```sh
-# Locate the arch-specific codex binary under npm's global root without resolving
-# symlinks (works for both `arm64` and `x86_64`, and with either flat or nested
-# npm layouts). BSD-safe; no `readlink -f` needed.
-CODEX_BIN="$(find "$(npm root -g)" -type f -name codex -path '*/vendor/*/bin/codex' 2>/dev/null | head -n 1)"
+# Inspect the SAME codex the bot actually spawns. lib/codex.ts runs bare
+# `codex`, which the LaunchAgent resolves via its fixed PATH — not the
+# interactive shell's PATH (which nvm/nodenv/asdf may shadow). Reproduce that
+# PATH here, then find the arch-specific vendor binary near the resolved codex.
+# BSD-safe; no `readlink -f`; works on arm64 and x86_64.
+BOT_PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$HOME/.bun/bin"
+NPM_BIN="$(PATH="$BOT_PATH" command -v npm)"
+[ -z "$NPM_BIN" ] && { echo "npm not on the bot's PATH"; return 1 2>/dev/null || exit 1; }
+NPM_ROOT="$("$NPM_BIN" root -g)"
+CODEX_BIN="$(find "$NPM_ROOT" -type f -name codex -path '*/vendor/*/bin/codex' 2>/dev/null | head -n 1)"
 if [ -z "$CODEX_BIN" ]; then
-  echo "codex arch binary not found under $(npm root -g)"
+  echo "codex arch binary not found under $NPM_ROOT"
 else
   spctl --assess -vvv --type execute "$CODEX_BIN"
 fi
