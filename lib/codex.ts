@@ -1,5 +1,9 @@
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const MAX_STDERR_CHARS = 2000;
+/** How long to wait for stderr to finish draining before reporting a failure. */
+const STDERR_GRACE_MS = 5000;
+/** How long to keep reading stdout after codex exits, to collect buffered output. */
+const POST_EXIT_DRAIN_MS = 1000;
 
 export type StreamCodexOptions = {
   /** Wall-clock budget for the whole run; the process is killed when it elapses. */
@@ -27,6 +31,7 @@ function stderrDetail(stderr: string): string {
 }
 
 const TIMED_OUT = Symbol("timed-out");
+const DRAIN_OVER = Symbol("drain-over");
 
 export async function* streamCodex(
   prompt: string,
@@ -69,16 +74,28 @@ export async function* streamCodex(
     fireTimeout();
   }, timeoutMs);
 
+  // Once codex has exited, everything it will ever emit is already sitting in
+  // the pipe buffer. Waiting for EOF instead would hang whenever a descendant
+  // inherited stdout and outlives it.
+  const drainOver = proc.exited
+    .then(() => Bun.sleep(POST_EXIT_DRAIN_MS))
+    .then(() => DRAIN_OVER);
+
   const stdoutReader = proc.stdout.getReader();
 
   try {
     const decoder = new TextDecoder();
     let buffer = "";
     let messageCount = 0;
+    let pendingRead: ReturnType<typeof stdoutReader.read> | null = null;
 
     while (true) {
-      const result = await Promise.race([stdoutReader.read(), timeoutFired]);
-      if (result === TIMED_OUT || result.done) break;
+      pendingRead ??= stdoutReader.read();
+      const result = await Promise.race([pendingRead, timeoutFired, drainOver]);
+      // Either sentinel ends the loop; `timedOut` distinguishes them below.
+      if (typeof result === "symbol") break;
+      pendingRead = null;
+      if (result.done) break;
 
       buffer += decoder.decode(result.value, { stream: true });
       const lines = buffer.split("\n");
@@ -110,9 +127,22 @@ export async function* streamCodex(
     }
 
     const exitCode = await proc.exited;
-    await stderrDrained;
+
+    // The kill may have landed after stdout closed rather than during the read.
+    if (timedOut) {
+      throw new Error(
+        `codex timed out after ${timeoutMs}ms${stderrDetail(stderrTail)}`,
+      );
+    }
 
     if (exitCode !== 0) {
+      // Only the failure path needs stderr, and the wait for it must be bounded:
+      // a descendant can hold the pipe open after codex itself has exited.
+      await Promise.race([
+        stderrDrained,
+        timeoutFired,
+        Bun.sleep(STDERR_GRACE_MS),
+      ]);
       throw new Error(
         `codex exited with code ${exitCode}${stderrDetail(stderrTail)}`,
       );

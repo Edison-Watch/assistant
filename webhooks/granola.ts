@@ -15,6 +15,13 @@ const DEDUP_TTL_SECONDS = 60 * 60 * 24 * 7;
 /** How long an in-flight claim is held before a retry may take over. */
 const LEASE_TTL_SECONDS = 15 * 60;
 
+// Promote/release only if this run still owns the key. A run that outlives its
+// lease must not clobber the claim a retry has since taken.
+const PROMOTE_IF_OWNED =
+  "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('SET', KEYS[1], 'done', 'EX', ARGV[2]) else return nil end";
+const RELEASE_IF_OWNED =
+  "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
+
 export function granolaWebhook(ctx: WebhookContext): WebhookRoute {
   const channelId = process.env.GRANOLA_SLACK_CHANNEL_ID;
   const secret = process.env.WEBHOOK_SECRET;
@@ -61,9 +68,10 @@ export function granolaWebhook(ctx: WebhookContext): WebhookRoute {
       // process dies mid-summary the lease expires and the sender's retry can
       // get through, instead of the meeting being silently dropped for a week.
       const dedupKey = `webhook:granola:${payload.meeting_id}`;
+      const leaseValue = `processing:${crypto.randomUUID()}`;
       const claimed = await redis.send("SET", [
         dedupKey,
-        "processing",
+        leaseValue,
         "NX",
         "EX",
         String(LEASE_TTL_SECONDS),
@@ -72,7 +80,7 @@ export function granolaWebhook(ctx: WebhookContext): WebhookRoute {
         return new Response("Duplicate (already processed)", { status: 200 });
       }
 
-      void processGranolaMeeting(ctx, channelId, payload as GranolaPayload, dedupKey);
+      void processGranolaMeeting(ctx, channelId, payload as GranolaPayload, dedupKey, leaseValue);
 
       return new Response("OK", { status: 200 });
     },
@@ -84,6 +92,7 @@ async function processGranolaMeeting(
   channelId: string,
   payload: GranolaPayload,
   dedupKey: string,
+  leaseValue: string,
 ) {
   const channel = ctx.bot.channel(`slack:${channelId}`);
   const attendees = Array.isArray(payload.attendees) ? payload.attendees : [];
@@ -110,7 +119,7 @@ ${payload.transcript}${payload.notes ? `\n\n--- Notes ---\n${payload.notes}` : "
     // Release the lease so the sender can retry. A retry after a partial post
     // can duplicate output, which is preferable to losing the summary entirely.
     try {
-      await redis.send("DEL", [dedupKey]);
+      await redis.send("EVAL", [RELEASE_IF_OWNED, "1", dedupKey, leaseValue]);
     } catch (delErr) {
       console.error("[granola webhook] failed to release dedup lease:", delErr);
     }
@@ -129,7 +138,13 @@ ${payload.transcript}${payload.notes ? `\n\n--- Notes ---\n${payload.notes}` : "
   // A failure here is not worth alarming Slack about: the worst case is the
   // lease expiring and a later retry re-posting the summary.
   try {
-    await redis.send("SET", [dedupKey, "done", "EX", String(DEDUP_TTL_SECONDS)]);
+    await redis.send("EVAL", [
+      PROMOTE_IF_OWNED,
+      "1",
+      dedupKey,
+      leaseValue,
+      String(DEDUP_TTL_SECONDS),
+    ]);
   } catch (err) {
     console.error("[granola webhook] failed to mark meeting complete:", err);
   }
