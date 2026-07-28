@@ -32,6 +32,7 @@ function stderrDetail(stderr: string): string {
 
 const TIMED_OUT = Symbol("timed-out");
 const DRAIN_OVER = Symbol("drain-over");
+const EXITED = Symbol("exited");
 
 export async function* streamCodex(
   prompt: string,
@@ -77,9 +78,11 @@ export async function* streamCodex(
   // Once codex has exited, everything it will ever emit is already sitting in
   // the pipe buffer. Waiting for EOF instead would hang whenever a descendant
   // inherited stdout and outlives it.
-  const drainOver = proc.exited
-    .then(() => Bun.sleep(POST_EXIT_DRAIN_MS))
-    .then(() => DRAIN_OVER);
+  let exited = false;
+  const exitSeen = proc.exited.then(() => {
+    exited = true;
+    return EXITED;
+  });
 
   const stdoutReader = proc.stdout.getReader();
 
@@ -91,8 +94,17 @@ export async function* streamCodex(
 
     while (true) {
       pendingRead ??= stdoutReader.read();
-      const result = await Promise.race([pendingRead, timeoutFired, drainOver]);
-      // Either sentinel ends the loop; `timedOut` distinguishes them below.
+      // The post-exit grace is armed fresh for each read, so it measures only
+      // time spent waiting on the pipe. Arming it once at exit would let a slow
+      // Slack consumer burn the window while suspended at a yield below, and a
+      // still-draining pipe would look empty.
+      const result = await Promise.race([
+        pendingRead,
+        timeoutFired,
+        exited ? Bun.sleep(POST_EXIT_DRAIN_MS).then(() => DRAIN_OVER) : exitSeen,
+      ]);
+      if (result === EXITED) continue; // re-race with the grace armed
+      // Either remaining sentinel ends the loop; `timedOut` distinguishes below.
       if (typeof result === "symbol") break;
       pendingRead = null;
       if (result.done) break;
