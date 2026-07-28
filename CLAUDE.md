@@ -14,7 +14,7 @@ Pluggable webhook handlers live in `webhooks/`. Each module exports a factory `(
 
 Shared conventions:
 - Auth: senders must include `X-Webhook-Secret: $WEBHOOK_SECRET`.
-- Dedup: handlers `SET key NX EX 604800` in Redis; duplicates return 200 without re-processing.
+- Dedup: handlers claim a short lease (`SET key NX EX 900`) in Redis, promote it to a 7-day completion marker on success, and delete it on failure so the sender can retry. Duplicates return 200 without re-processing.
 - Async: handlers return 200 immediately and process in the background. Failures post a `:warning:` notice to the same Slack channel.
 - Codex: reuse `lib/codex.ts#streamCodex` and pipe it into `bot.channel("slack:Cxxx").post(...)` for a streamed Slack reply.
 
