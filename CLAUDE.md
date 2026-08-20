@@ -4,5 +4,20 @@ Slack bot using [chat-sdk](https://chat-sdk.dev) with `@chat-adapter/slack` (web
 
 - Runtime: Bun (auto-loads `.env`, no dotenv needed)
 - HTTP server: `Bun.serve()` on port 3123
-- State: local Redis on `localhost:6379`
+- State: local Redis on `localhost:6379` (also used for inbound-webhook dedup via `Bun.redis`)
 - Slack setup and known issues: `docs/SLACK_INTEGRATION.md`
+- Deployment (launchd LaunchAgent, external-volume Full Disk Access, codex cert gotcha): `docs/DEPLOY.md`
+
+## Inbound webhooks (custom, non-Slack)
+
+Pluggable webhook handlers live in `webhooks/`. Each module exports a factory `(ctx: { bot }) => { path, handler }`; `index.ts` mounts them under `Bun.serve({ routes })`. Add a source by creating `webhooks/<name>.ts` and pushing the factory into the `webhooks` array in `index.ts`.
+
+Shared conventions:
+- Auth: senders must include `X-Webhook-Secret: $WEBHOOK_SECRET`.
+- Dedup: handlers claim a short lease (`SET key NX EX 900`) in Redis, promote it to a 7-day completion marker on success, and delete it on failure so the sender can retry. Duplicates return 200 without re-processing.
+- Async: handlers return 200 immediately and process in the background. Failures post a `:warning:` notice to the same Slack channel.
+- Codex: reuse `lib/codex.ts#streamCodex` and pipe it into `bot.channel("slack:Cxxx").post(...)` for a streamed Slack reply.
+- Untrusted content: webhook payloads are attacker-influenceable text going into a tool-enabled prompt. Wrap it in a per-request random fence, tell Codex to treat it as data, and pass `streamCodex(prompt, { cwd })` pointing at an empty directory so there's nothing local to exfiltrate — `git init` it first, since `codex exec` refuses to start outside a git repo. Codex's own `-s read-only` sandbox is the backstop, not the only defence.
+
+Current sources:
+- `webhooks/granola.ts` — `POST /api/webhooks/granola`. Expects `{ meeting_id, title, transcript, notes?, attendees? }`. Posts a Codex summary to `GRANOLA_SLACK_CHANNEL_ID` (intended: `#edison-os-updates`).

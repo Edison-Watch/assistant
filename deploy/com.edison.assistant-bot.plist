@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  launchd LaunchAgent template for the Slack bot. See docs/DEPLOY.md.
+
+  This is a TEMPLATE: __USER__ and __WORKDIR__ are placeholders that must be
+  substituted before installing to ~/Library/LaunchAgents/. The install command
+  in docs/DEPLOY.md renders it with sed. Do NOT add secrets — env comes from
+  .env in WorkingDirectory (auto-loaded by Bun).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.edison.assistant-bot</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/bun</string>
+        <string>run</string>
+        <string>index.ts</string>
+    </array>
+
+    <!-- Absolute path to your checkout (real path, not a symlink). -->
+    <key>WorkingDirectory</key>
+    <string>__WORKDIR__</string>
+
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>ThrottleInterval</key><integer>10</integer>
+
+    <key>StandardOutPath</key><string>/Users/__USER__/Library/Logs/assistant-bot.log</string>
+    <key>StandardErrorPath</key><string>/Users/__USER__/Library/Logs/assistant-bot.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/Users/__USER__/.bun/bin</string>
+        <key>HOME</key>
+        <string>/Users/__USER__</string>
+    </dict>
+</dict>
+</plist>
