@@ -17,6 +17,7 @@ Shared conventions:
 - Dedup: handlers claim a short lease (`SET key NX EX 900`) in Redis, promote it to a 7-day completion marker on success, and delete it on failure so the sender can retry. Duplicates return 200 without re-processing.
 - Async: handlers return 200 immediately and process in the background. Failures post a `:warning:` notice to the same Slack channel.
 - Codex: reuse `lib/codex.ts#streamCodex` and pipe it into `bot.channel("slack:Cxxx").post(...)` for a streamed Slack reply.
+- Untrusted content: webhook payloads are attacker-influenceable text going into a tool-enabled prompt. Wrap it in a per-request random fence, tell Codex to treat it as data, and pass `streamCodex(prompt, { cwd })` pointing at an empty directory so there's nothing local to exfiltrate. Codex's own `-s read-only` sandbox is the backstop, not the only defence.
 
 Current sources:
 - `webhooks/granola.ts` — `POST /api/webhooks/granola`. Expects `{ meeting_id, title, transcript, notes?, attendees? }`. Posts a Codex summary to `GRANOLA_SLACK_CHANNEL_ID` (intended: `#edison-os-updates`).

@@ -8,6 +8,12 @@ const POST_EXIT_DRAIN_MS = 1000;
 export type StreamCodexOptions = {
   /** Wall-clock budget for the whole run; the process is killed when it elapses. */
   timeoutMs?: number;
+  /**
+   * Working directory for the codex process. Defaults to this process's cwd —
+   * i.e. the repo — which is what the Slack path wants. Callers whose prompt
+   * carries untrusted text should point this at a directory with nothing in it.
+   */
+  cwd?: string;
 };
 
 /** Text of an agent message event, or null if this line isn't one. */
@@ -42,7 +48,12 @@ export async function* streamCodex(
 
   const proc = Bun.spawn(
     ["codex", "exec", "--ephemeral", "-s", "read-only", "--json", "-"],
-    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+    {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      ...(opts.cwd ? { cwd: opts.cwd } : {}),
+    },
   );
   proc.stdin.write(prompt);
   proc.stdin.end();
