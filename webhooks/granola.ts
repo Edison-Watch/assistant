@@ -96,6 +96,35 @@ export function granolaWebhook(ctx: WebhookContext): WebhookRoute {
   };
 }
 
+/**
+ * The empty directory codex runs the summary in, created on first use.
+ *
+ * It has to be a git repo: `codex exec` refuses to start in a directory that
+ * isn't one. Initializing the directory rather than passing
+ * `--skip-git-repo-check` keeps this working regardless of what that flag is
+ * called in whichever codex version is installed.
+ */
+async function ensureSummarizerCwd(): Promise<string> {
+  await mkdir(SUMMARIZER_CWD, { recursive: true });
+
+  if (await Bun.file(join(SUMMARIZER_CWD, ".git", "HEAD")).exists()) {
+    return SUMMARIZER_CWD;
+  }
+
+  const init = Bun.spawn(["git", "init", "--quiet", SUMMARIZER_CWD], {
+    stdout: "ignore",
+    stderr: "pipe",
+  });
+  const code = await init.exited;
+  if (code !== 0) {
+    const detail = (await new Response(init.stderr).text()).trim();
+    throw new Error(
+      `git init failed for summarizer workspace ${SUMMARIZER_CWD} (code ${code})${detail ? `: ${detail}` : ""}`,
+    );
+  }
+  return SUMMARIZER_CWD;
+}
+
 async function processGranolaMeeting(
   ctx: WebhookContext,
   channelId: string,
@@ -135,8 +164,7 @@ ${payload.transcript}${payload.notes ? `\n\n--- Notes ---\n${payload.notes}` : "
 ${fence}`;
 
   try {
-    await mkdir(SUMMARIZER_CWD, { recursive: true });
-    await channel.post(streamCodex(prompt, { cwd: SUMMARIZER_CWD }));
+    await channel.post(streamCodex(prompt, { cwd: await ensureSummarizerCwd() }));
   } catch (err) {
     console.error("[granola webhook] processing failed:", err);
     // Release the lease so the sender can retry. A retry after a partial post

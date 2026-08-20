@@ -46,13 +46,19 @@ export async function* streamCodex(
 ): AsyncIterable<string> {
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
+  // Explicit rather than truthy: cwd is an isolation boundary, and a caller that
+  // computes an empty path should fail loudly instead of silently getting the repo.
+  if (opts.cwd !== undefined && opts.cwd.trim() === "") {
+    throw new Error("streamCodex: cwd was set to an empty path");
+  }
+
   const proc = Bun.spawn(
     ["codex", "exec", "--ephemeral", "-s", "read-only", "--json", "-"],
     {
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-      ...(opts.cwd ? { cwd: opts.cwd } : {}),
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
     },
   );
   proc.stdin.write(prompt);
