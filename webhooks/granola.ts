@@ -97,6 +97,14 @@ export function granolaWebhook(ctx: WebhookContext): WebhookRoute {
 }
 
 /**
+ * Set once the workspace is ready, so concurrent meetings share one setup
+ * instead of racing. `git init` creates `.git/HEAD` partway through its work,
+ * so a second caller checking for that file could otherwise hand codex a
+ * half-built repo. Cleared on failure so the next meeting retries.
+ */
+let summarizerCwdReady: Promise<string> | null = null;
+
+/**
  * The empty directory codex runs the summary in, created on first use.
  *
  * It has to be a git repo: `codex exec` refuses to start in a directory that
@@ -104,9 +112,18 @@ export function granolaWebhook(ctx: WebhookContext): WebhookRoute {
  * `--skip-git-repo-check` keeps this working regardless of what that flag is
  * called in whichever codex version is installed.
  */
-async function ensureSummarizerCwd(): Promise<string> {
+function ensureSummarizerCwd(): Promise<string> {
+  summarizerCwdReady ??= initSummarizerCwd().catch((err) => {
+    summarizerCwdReady = null;
+    throw err;
+  });
+  return summarizerCwdReady;
+}
+
+async function initSummarizerCwd(): Promise<string> {
   await mkdir(SUMMARIZER_CWD, { recursive: true });
 
+  // Present from an earlier run of the bot; nothing to do.
   if (await Bun.file(join(SUMMARIZER_CWD, ".git", "HEAD")).exists()) {
     return SUMMARIZER_CWD;
   }
